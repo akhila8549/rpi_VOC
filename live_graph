@@ -1,0 +1,136 @@
+import board
+import adafruit_bme680
+import time
+import plotly.graph_objs as go
+import dash
+from dash.dependencies import Output, Input
+from dash import dcc
+from dash import html
+from collections import deque
+import csv
+import pandas as pd
+
+i2c = board.I2C()
+sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c)
+sensor.seaLevelhPa = 1014.5
+temp = []
+gas = []
+humidity = []
+pressure = []
+altitude = []
+header = ['VOC (measured in electric resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude']
+
+
+    
+while True:
+    
+    # deque is a double-ended queue
+
+    X = deque(maxlen = 50000)
+    # starting datapoint of 1
+    X.append(0)
+
+    Y = deque(maxlen = 50000)
+    Y.append(0)
+    
+    t = deque(maxlen=50000)
+    t.append(0)
+    
+    h = deque(maxlen=50000)
+    h.append(0)
+    
+    p = deque(maxlen=50000)
+    p.append(0)
+    
+    a = deque(maxlen = 50000)
+    a.append(0)
+
+    app = dash.Dash(__name__) 
+    app.layout = html.Div(
+        [
+            dcc.Graph(id = 'live-graph',
+                      animate = True),
+            dcc.Interval(
+                id = 'graph-update',
+    #             time between data updates
+                interval = 5000,
+    #             number of intervals completed
+                n_intervals = 0
+                ),
+            html.Button("Download CSV", id='btn'),
+            dcc.Download(id='download')
+            ]
+        )
+    # callbacks
+    @app.callback(
+        
+            Output('live-graph', 'figure'),
+        
+       [ Input('graph-update', 'n_intervals')]
+    )
+
+    
+    # taking n_intervals as parameter
+    def update_graph(n):
+    #     sequential x values
+        X.append(X[-1]+1)
+        
+        Y.append(sensor.gas)
+        t.append(sensor.temperature)
+        h.append(sensor.humidity)
+        p.append(sensor.pressure)
+        a.append(sensor.altitude)
+       
+        voc_data = go.Scatter(
+            x = list(X),
+            y = list(Y),
+            name = 'VOC (resistance, in Ohms)',
+            mode = 'lines',
+            )
+                
+        temp_data = go.Scatter(
+            x = list(X),
+            y = list(t),
+            name = 'Temperature (Celsius)',
+            mode = 'lines')
+        
+        humidity_data = go.Scatter(
+            x= list(X),
+            y = list(h),
+            name = 'Humidity (% relative humidity)',
+            mode = 'lines')
+        
+        pressure_data = go.Scatter(
+            x = list(X),
+            y = list(p),
+            name = 'Pressure (hPa)',
+            mode = 'lines')
+        
+        altitude_data = go.Scatter(
+            x = list(X),
+            y = list(a),
+            name = 'Altitude (cm)',
+            mode = 'lines')
+        
+        f = 'VOC_data.csv'
+        with open(f, 'w', newline='') as file:
+         writer = csv.writer(file)
+         writer.writerow(header)
+         for i in range (len(X)):
+             if i == 0:  # preventing indexing errors, because the first value has index 0 
+                 line = [Y[i], t[i], h[i], p[i], a[i]]
+             else:
+                 line = [Y[i-1], t[i-1], h[i-1], p[i-1], a[i-1]] # preventing indexing errors, e.g. 4th value has index of 3 instead of 4
+             writer.writerow(line)
+         
+        
+        return {'data':[voc_data, temp_data, humidity_data, pressure_data, altitude_data],
+                'layout': go.Layout(xaxis = dict(
+                        range = [min(X), max(X)]), xaxis_title = dict(text='Time (seconds)')
+                                
+                        )}
+ 
+
+    if __name__ == '__main__':
+        app.run_server()
+                              
