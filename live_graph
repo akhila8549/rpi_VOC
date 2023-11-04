@@ -1,5 +1,6 @@
-import board
+import board 
 import adafruit_bme680
+import adafruit_scd30
 import time
 import plotly.graph_objs as go
 import dash
@@ -12,13 +13,24 @@ import pandas as pd
 
 i2c = board.I2C()
 sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c)
+try: # checking for a co2 sensor
+    scd = adafruit_scd30.SCD30(board.I2C())
+except Exception as e: # if no co2 sensor, assume all co2 values are 0
+    scd = 0
 sensor.seaLevelhPa = 1014.5
 temp = []
 gas = []
 humidity = []
 pressure = []
 altitude = []
-header = ['VOC (measured in electric resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude']
+
+# if co2 sensor is there, include in header, if not then exclude
+if scd != 0:
+    co2 = []
+    header = ['VOC (measured in electric resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude', 'CO2']
+else:
+    header = ['VOC (measured in electric resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude']
+
 
 
     
@@ -44,10 +56,14 @@ while True:
     
     a = deque(maxlen = 50000)
     a.append(0)
+    
+    c = deque(maxlen=50000)
+    c.append(0)
 
     app = dash.Dash(__name__) 
     app.layout = html.Div(
         [
+            html.Button ('Stop', id='stop_btn', n_clicks=0),
             dcc.Graph(id = 'live-graph',
                       animate = True),
             dcc.Interval(
@@ -58,78 +74,101 @@ while True:
                 n_intervals = 0
                 ),
             html.Button("Download CSV", id='btn'),
-            dcc.Download(id='download')
+            dcc.Download(id='download')           
             ]
         )
     # callbacks
     @app.callback(
         
             Output('live-graph', 'figure'),
-        
-       [ Input('graph-update', 'n_intervals')]
+            Input('graph-update', 'n_intervals'),
+            Input('stop_btn', 'n_clicks')
     )
-
     
-    # taking n_intervals as parameter
-    def update_graph(n):
-    #     sequential x values
-        X.append(X[-1]+1)
-        
-        Y.append(sensor.gas)
-        t.append(sensor.temperature)
-        h.append(sensor.humidity)
-        p.append(sensor.pressure)
-        a.append(sensor.altitude)
-       
-        voc_data = go.Scatter(
-            x = list(X),
-            y = list(Y),
-            name = 'VOC (resistance, in Ohms)',
-            mode = 'lines',
-            )
+    def update_graph(n, n_clicks):
+        while True:
+            if n_clicks % 2 ==0:
                 
-        temp_data = go.Scatter(
-            x = list(X),
-            y = list(t),
-            name = 'Temperature (Celsius)',
-            mode = 'lines')
-        
-        humidity_data = go.Scatter(
-            x= list(X),
-            y = list(h),
-            name = 'Humidity (% relative humidity)',
-            mode = 'lines')
-        
-        pressure_data = go.Scatter(
-            x = list(X),
-            y = list(p),
-            name = 'Pressure (hPa)',
-            mode = 'lines')
-        
-        altitude_data = go.Scatter(
-            x = list(X),
-            y = list(a),
-            name = 'Altitude (cm)',
-            mode = 'lines')
-        
-        f = 'VOC_data.csv'
-        with open(f, 'w', newline='') as file:
-         writer = csv.writer(file)
-         writer.writerow(header)
-         for i in range (len(X)):
-             if i == 0:  # preventing indexing errors, because the first value has index 0 
-                 line = [Y[i], t[i], h[i], p[i], a[i]]
-             else:
-                 line = [Y[i-1], t[i-1], h[i-1], p[i-1], a[i-1]] # preventing indexing errors, e.g. 4th value has index of 3 instead of 4
-             writer.writerow(line)
-         
-        
-        return {'data':[voc_data, temp_data, humidity_data, pressure_data, altitude_data],
-                'layout': go.Layout(xaxis = dict(
-                        range = [min(X), max(X)]), xaxis_title = dict(text='Time (seconds)')
-                                
-                        )}
- 
+                #  sequential x values
+                X.append(X[-1]+1)
+                
+                Y.append(sensor.gas)
+                t.append(sensor.temperature)
+                h.append(sensor.humidity)
+                p.append(sensor.pressure)
+                a.append(sensor.altitude)
+                
+                # if co2 sensor present, take data values, if absent assume co2 values to be 0
+                if scd != 0:
+                    c.append(scd.CO2)
+                else:
+                    c.append(0)
+               
+                voc_data = go.Scatter(
+                    x = list(X),
+                    y = list(Y),
+                    name = 'VOC (resistance, in Ohms)',
+                    mode = 'lines',
+                    )
+                        
+                temp_data = go.Scatter(
+                    x = list(X),
+                    y = list(t),
+                    name = 'Temperature (Celsius)',
+                    mode = 'lines')
+                
+                humidity_data = go.Scatter(
+                    x= list(X),
+                    y = list(h),
+                    name = 'Humidity (% relative humidity)',
+                    mode = 'lines')
+                
+                pressure_data = go.Scatter(
+                    x = list(X),
+                    y = list(p),
+                    name = 'Pressure (hPa)',
+                    mode = 'lines')
+                
+                altitude_data = go.Scatter(
+                    x = list(X),
+                    y = list(a),
+                    name = 'Altitude (cm)',
+                    mode = 'lines')
+                
+                co2_data = go.Scatter(
+                    x = list(X),
+                    y = list(c),
+                    name = 'CO2 (PPM)',
+                    mode = 'lines')
+                
+                f = 'VOC_data.csv'
+                with open(f, 'w', newline='') as file:
+                 writer = csv.writer(file)
+                 writer.writerow(header)
+                 for i in range (len(X)):
+                     if i == 0:
+                         # if co2 sensor present, include in line, otherwise exclude
+                         if scd != 0: 
+                             line = [Y[i], t[i], h[i], p[i], a[i], c[i]]# preventing indexing errors, because the first value has index 0 
+
+                         else:
+                             line = [Y[i], t[i], h[i], p[i], a[i]]
+                     else:
+                         # if co2 sensor present, include in line, otherwise exclude
+                         if scd != 0:
+                             line = [Y[i-1], t[i-1], h[i-1], p[i-1], a[i-1], c[i-1]] # preventing indexing errors, e.g. 4th value has index of 3 instead of 4
+                         else:
+                             line = [Y[i-1], t[i-1], h[i-1], p[i-1], a[i-1]]
+                             
+                     writer.writerow(line)
+                 
+                
+                return {'data':[voc_data, temp_data, humidity_data, pressure_data, altitude_data, co2_data],
+                        'layout': go.Layout(xaxis = dict(
+                                range = [min(X), max(X)]), xaxis_title = dict(text='Time (seconds)'), clickmode = 'event+select'
+                                        
+                                )}
+     
 
     if __name__ == '__main__':
         app.run_server()
