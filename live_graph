@@ -1,4 +1,6 @@
-import board 
+import board
+import busio
+from adafruit_pm25.i2c import PM25_I2C
 import adafruit_bme680
 import adafruit_scd30
 import time
@@ -11,29 +13,48 @@ from collections import deque
 import csv
 import pandas as pd
 
-i2c = board.I2C()
-sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c)
+bme680_i2c = board.I2C()
+pm25_i2c = busio.I2C(board.SCL, board.SDA, frequency=100000)
+try: # checking for bme680 sensor
+    sensor = adafruit_bme680.Adafruit_BME680_I2C(bme680_i2c)
+except Exception as e:
+    sensor = 0
+    
+try: # checking for pm25 sensor
+    pm25 = adafruit_pm25.i2c.PM25(pm25_i2c)
+except Exception as e:
+    pm25 = 0
+    
 try: # checking for a co2 sensor
     scd = adafruit_scd30.SCD30(board.I2C())
-except Exception as e: # if no co2 sensor, assume all co2 values are 0
+except Exception as e: 
     scd = 0
-sensor.seaLevelhPa = 1014.5
-temp = []
-gas = []
-humidity = []
-pressure = []
-altitude = []
+    
+if sensor != 0:    
+    sensor.seaLevelhPa = 1014.5
+    temp = []
+    gas = []
+    humidity = []
+    pressure = []
+    altitude = []
 
 # if co2 sensor is there, include in header, if not then exclude
 if scd != 0:
     co2 = []
-    header = ['VOC (measured in electric resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude', 'CO2']
-else:
-    header = ['VOC (measured in electric resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude']
-
-
-
     
+sensor_names = {sensor:['VOC (measured in electrical resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude'],
+                scd:'CO2', pm25:'Air Quality'
+                }
+sensor_list = [sensor, scd, pm25]
+active_sensors = []
+for s in sensor_list:
+    if s != 0:
+        active_sensors.append(s)
+        
+header = []
+for a in active_sensors:
+    header.append(sensor_names[a])
+
 while True:
     
     # deque is a double-ended queue
@@ -41,24 +62,52 @@ while True:
     X = deque(maxlen = 50000)
     # starting datapoint of 1
     X.append(0)
-
-    Y = deque(maxlen = 50000)
-    Y.append(0)
     
-    t = deque(maxlen=50000)
-    t.append(0)
+    if sensor != 0:
+        Y = deque(maxlen = 50000)
+        Y.append(0)
+        
+        t = deque(maxlen=50000)
+        t.append(0)
+        
+        h = deque(maxlen=50000)
+        h.append(0)
+        
+        p = deque(maxlen=50000)
+        p.append(0)
+        
+        a = deque(maxlen = 50000)
+        a.append(0)
+    else:
+        Y, t, h, p, a = None
+        
+    if scd != 0:
+        c = deque(maxlen=50000)
+        c.append(0)
+    else:
+        c = None
     
-    h = deque(maxlen=50000)
-    h.append(0)
-    
-    p = deque(maxlen=50000)
-    p.append(0)
-    
-    a = deque(maxlen = 50000)
-    a.append(0)
-    
-    c = deque(maxlen=50000)
-    c.append(0)
+    if pm25 != 0:
+        pt3_um = deque(maxlen=50000) # 0.3um particles
+        pt3_um.append(0)
+        
+        pt5_um = deque(maxlen=50000) # 0.5um particles
+        pt5_um.append(0)
+        
+        one_um = deque(maxlen = 50000) # 1um particles
+        one_um.append(0)
+        
+        twopt5_um = deque(maxlen = 50000) # 2.5um particles
+        twopt5_um.append(0)
+        
+        five_um = deque(maxlen = 50000) # 5um particles
+        five_um.append(0)
+        
+        ten_um = deque(maxlen = 50000) # 10um particles
+        ten_um.append(0)
+        
+    else:
+        pt3_um, pt5_um, one_um, twopt5_um, five_um, ten_um = None
 
     app = dash.Dash(__name__) 
     app.layout = html.Div(
@@ -87,88 +136,156 @@ while True:
     
     def update_graph(n, n_clicks):
         while True:
-            if n_clicks % 2 ==0:
+            if n_clicks % 2 ==0: # press Stop once to stop, press again to resume
                 
                 #  sequential x values
                 X.append(X[-1]+1)
                 
-                Y.append(sensor.gas)
-                t.append(sensor.temperature)
-                h.append(sensor.humidity)
-                p.append(sensor.pressure)
-                a.append(sensor.altitude)
+                if sensor != 0:
+                    Y.append(sensor.gas)
+                    t.append(sensor.temperature)
+                    h.append(sensor.humidity)
+                    p.append(sensor.pressure)
+                    a.append(sensor.altitude)
                 
                 # if co2 sensor present, take data values, if absent assume co2 values to be 0
                 if scd != 0:
                     c.append(scd.CO2)
-                else:
-                    c.append(0)
-               
-                voc_data = go.Scatter(
-                    x = list(X),
-                    y = list(Y),
-                    name = 'VOC (resistance, in Ohms)',
-                    mode = 'lines',
-                    )
-                        
-                temp_data = go.Scatter(
-                    x = list(X),
-                    y = list(t),
-                    name = 'Temperature (Celsius)',
-                    mode = 'lines')
+                    
+                if pm25 != 0:
+                    aqdata = pm25.read()
+                    pt3_um.append(aqdata['particles 03um'])
+                    pt5_um.append(aqdata['particles 05um'])
+                    one_um.append(aqdata['particles 10um'])
+                    twopt5_um.append(aqdata['particles 25um'])
+                    five_um.append(aqdata['particles 50um'])
+                    ten_um.append(aqdata['particles 100um'])
+                    
+                graphed_data = []
                 
-                humidity_data = go.Scatter(
-                    x= list(X),
-                    y = list(h),
-                    name = 'Humidity (% relative humidity)',
-                    mode = 'lines')
+                if sensor != 0:
+                    voc_data = go.Scatter(
+                        x = list(X),
+                        y = list(Y),
+                        name = 'VOC (resistance, in Ohms)',
+                        mode = 'lines',
+                        )
+                    graphed_data.append(voc_data)       
+                            
+                    temp_data = go.Scatter(
+                        x = list(X),
+                        y = list(t),
+                        name = 'Temperature (Celsius)',
+                        mode = 'lines')
+                    graphed_data.append(temp_data)
+                    
+                    humidity_data = go.Scatter(
+                        x= list(X),
+                        y = list(h),
+                        name = 'Humidity (% relative humidity)',
+                        mode = 'lines')
+                    graphed_data.append(humidity_data)
+                    
+                    pressure_data = go.Scatter(
+                        x = list(X),
+                        y = list(p),
+                        name = 'Pressure (hPa)',
+                        mode = 'lines')
+                    graphed_data.append(pressure_data)
+                    
+                    altitude_data = go.Scatter(
+                        x = list(X),
+                        y = list(a),
+                        name = 'Altitude (cm)',
+                        mode = 'lines')
+                    graphed_data.append(altitude_data)
+                    
+                if scd != 0:
+                    co2_data = go.Scatter(
+                        x = list(X),
+                        y = list(c),
+                        name = 'CO2 (PPM)',
+                        mode = 'lines')
+                    graphed_data.append(co2_data)
                 
-                pressure_data = go.Scatter(
-                    x = list(X),
-                    y = list(p),
-                    name = 'Pressure (hPa)',
-                    mode = 'lines')
+                if pm25 != 0:
+                    pt3_um_data = go.Scatter(
+                        x = list(X),
+                        y = list(pt3_um),
+                        name = 'Particles > 0.3um / 0.1L air',
+                        mode = 'lines')
+                    graphed_data.append(pt3_um_data)
+                    
+                    pt5_um_data = go.Scatter(
+                        x = list(X),
+                        y = list(pt5_um),
+                        name = 'Particles > 0.5um / 0.1L air',
+                        mode = 'lines')
+                    graphed_data.append(pt5_um_data)
+                    
+                    one_um_data = go.Scatter(
+                        x = list(X),
+                        y = list(one_um),
+                        name = 'Particles > 1.0um / 0.1L air',
+                        mode = 'lines')
+                    graphed_data.append(one_um_data)
+                    
+                    twopt5_um_data = go.Scatter(
+                        x = list(X),
+                        y = list(twopt5_um),
+                        name = 'Particles > 2.5um / 0.1L air',
+                        mode = 'lines')
+                    graphed_data.append(twopt5_um_data)
+                    
+                    five_um_data = go.Scatter(
+                        x = list(X),
+                        y = list(five_um),
+                        name = 'Particles > 5.0um / 0.1L air',
+                        mode = 'lines')
+                    graphed_data.append(five_um_data)
+                    
+                    ten_um_data = go.Scatter(
+                        x = list(X),
+                        y = list(ten_um),
+                        name = 'Particles > 10um / 0.1L air',
+                        mode = 'lines')
+                    graphed_data.append(ten_um_data)
+
                 
-                altitude_data = go.Scatter(
-                    x = list(X),
-                    y = list(a),
-                    name = 'Altitude (cm)',
-                    mode = 'lines')
+                collected_data = []
+                collected_data.append(Y)
+                collected_data.append(t)
+                collected_data.append(h)
+                collected_data.append(p)
+                collected_data.append(a)
+                collected_data.append(c)
+                for d in collected_data:
+                    if d is None:
+                        collected_data.remove(d)
                 
-                co2_data = go.Scatter(
-                    x = list(X),
-                    y = list(c),
-                    name = 'CO2 (PPM)',
-                    mode = 'lines')
-                
-                f = 'VOC_data.csv'
+                f = 'rpi_data.csv'
                 with open(f, 'w', newline='') as file:
                  writer = csv.writer(file)
                  writer.writerow(header)
+                
                  for i in range (len(X)):
                      if i == 0:
-                         # if co2 sensor present, include in line, otherwise exclude
-                         if scd != 0: 
-                             line = [Y[i], t[i], h[i], p[i], a[i], c[i]]# preventing indexing errors, because the first value has index 0 
+                         line = []
+                         line.append(d[i]for d in collected_data) # preventing indexing errors, because the first value has index 0 
 
-                         else:
-                             line = [Y[i], t[i], h[i], p[i], a[i]]
                      else:
-                         # if co2 sensor present, include in line, otherwise exclude
-                         if scd != 0:
-                             line = [Y[i-1], t[i-1], h[i-1], p[i-1], a[i-1], c[i-1]] # preventing indexing errors, e.g. 4th value has index of 3 instead of 4
-                         else:
-                             line = [Y[i-1], t[i-1], h[i-1], p[i-1], a[i-1]]
-                             
+                         line =[]
+                         line.append(d[i-1] for d in collected_data) # preventing indexing errors, e.g. 4th value has index of 3 instead of 4
+
                      writer.writerow(line)
                  
-                
-                return {'data':[voc_data, temp_data, humidity_data, pressure_data, altitude_data, co2_data],
+
+                return {'data':graphed_data,
                         'layout': go.Layout(xaxis = dict(
                                 range = [min(X), max(X)]), xaxis_title = dict(text='Time (seconds)'), clickmode = 'event+select'
-                                        
+                                            
                                 )}
-     
+    
 
     if __name__ == '__main__':
         app.run_server()
