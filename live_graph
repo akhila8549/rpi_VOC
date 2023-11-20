@@ -148,7 +148,6 @@ while True:
                     p.append(sensor.pressure)
                     a.append(sensor.altitude)
                 
-                # if co2 sensor present, take data values, if absent assume co2 values to be 0
                 if scd != 0:
                     c.append(scd.CO2)
                     
