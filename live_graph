@@ -1,114 +1,89 @@
-import board
+ import board
 import busio
 from adafruit_pm25.i2c import PM25_I2C
 import adafruit_bme680
 import adafruit_scd30
-import time
 import plotly.graph_objs as go
 import dash
 from dash.dependencies import Output, Input
 from dash import dcc
 from dash import html
-from collections import deque
 import csv
-import pandas as pd
 
 bme680_i2c = board.I2C()
 pm25_i2c = busio.I2C(board.SCL, board.SDA, frequency=100000)
-try: # checking for bme680 sensor
-    sensor = adafruit_bme680.Adafruit_BME680_I2C(bme680_i2c)
-except Exception as e:
-    sensor = 0
-    
-try: # checking for pm25 sensor
-    pm25 = adafruit_pm25.i2c.PM25(pm25_i2c)
-except Exception as e:
-    pm25 = 0
-    
-try: # checking for a co2 sensor
-    scd = adafruit_scd30.SCD30(board.I2C())
-except Exception as e: 
-    scd = 0
-    
-if sensor != 0:    
-    sensor.seaLevelhPa = 1014.5
-    temp = []
-    gas = []
-    humidity = []
-    pressure = []
-    altitude = []
 
-# if co2 sensor is there, include in header, if not then exclude
-if scd != 0:
-    co2 = []
+# naming csv files to store data from each sensor
+pth_data = 'PTH_data.csv'
+aq_data = 'AQ_data.csv'
+co2_data = 'CO2_data.csv'
+
+# creating csv files on the user's computer to store each sensor's data
+# wiping the files clean each time sensors start
+
+with(
+    open(pth_data, 'w+') as pth_file,
+    open(aq_data, 'w+') as aq_file,
+    open(co2_data, 'w+') as co2_file
+    ):
+    pth_file.close()
+    aq_file.close()
+    co2_file.close()
     
-sensor_names = {sensor:['VOC (measured in electrical resistance)', 'Temperature', 'Humidity', 'Pressure', 'Altitude'],
-                scd:'CO2', pm25:'Air Quality'
-                }
-sensor_list = [sensor, scd, pm25]
-active_sensors = []
-for s in sensor_list:
-    if s != 0:
-        active_sensors.append(s)
-        
-header = []
-for a in active_sensors:
-    header.append(sensor_names[a])
+def pth(pth_file):
+    try: # checking for bme680 sensor
+        sensor = adafruit_bme680.Adafruit_BME680_I2C(bme680_i2c)
+    except Exception as e:
+        sensor = 0
+    if sensor != 0:
+        writer = csv.writer(pth_file)
+        pth_line = []                        
+        pth_line.append(sensor.gas)
+        pth_line.append(sensor.temperature)
+        pth_line.append(sensor.humidity)
+        pth_line.append(sensor.pressure)
+        pth_line.append(sensor.altitude)
+        writer.writerow(pth_line)
+    else:
+        writer = csv.writer(pth_file)
+        writer.writerow(['0', '0', '0', '0', '0'])
+    
+def aq(aq_file):         
+    try: # checking for a pm25 air quality sensor
+        aq = adafruit_pm25.i2c.PM25(pm25_i2c)
+    except Exception as e: 
+        aq = 0
+    if aq != 0:
+        writer = csv.writer(aq_file)
+        aq_line = []
+        read_data = pm25.read()
+        aq_line.append(aqdata['particles 03um'])
+        aq_line.append(aqdata['particles 05um'])
+        aq_line.append(aqdata['particles 10um'])
+        aq_line.append(aqdata['particles 25um'])
+        aq_line.append(aqdata['particles 50um'])
+        aq_line.append(aqdata['particles 100um'])
+        writer.writerow(aq_line)
+    elif aq == 0:
+        writer = csv.writer(aq_file)
+        writer.writerow(['0', '0', '0', '0', '0', '0'])
+
+def co2(co2_file):         
+    try: # checking for a co2 sensor
+        scd = adafruit_scd30.SCD30(board.I2C())
+    except Exception as e: 
+        scd = 0
+    if scd != 0:
+        writer = csv.writer(co2_file)
+        co2_line = []
+        if scd.CO2 != None:
+            co2_line.append(scd.CO2)
+            writer.writerow(co2_line)
+    else:
+        writer = csv.writer(co2_file)
+        writer.writerow('0')
 
 while True:
-    
-    # deque is a double-ended queue
-
-    X = deque(maxlen = 50000)
-    # starting datapoint of 1
-    X.append(0)
-    
-    if sensor != 0:
-        Y = deque(maxlen = 50000)
-        Y.append(0)
-        
-        t = deque(maxlen=50000)
-        t.append(0)
-        
-        h = deque(maxlen=50000)
-        h.append(0)
-        
-        p = deque(maxlen=50000)
-        p.append(0)
-        
-        a = deque(maxlen = 50000)
-        a.append(0)
-    else:
-        Y, t, h, p, a = None
-        
-    if scd != 0:
-        c = deque(maxlen=50000)
-        c.append(0)
-    else:
-        c = None
-    
-    if pm25 != 0:
-        pt3_um = deque(maxlen=50000) # 0.3um particles
-        pt3_um.append(0)
-        
-        pt5_um = deque(maxlen=50000) # 0.5um particles
-        pt5_um.append(0)
-        
-        one_um = deque(maxlen = 50000) # 1um particles
-        one_um.append(0)
-        
-        twopt5_um = deque(maxlen = 50000) # 2.5um particles
-        twopt5_um.append(0)
-        
-        five_um = deque(maxlen = 50000) # 5um particles
-        five_um.append(0)
-        
-        ten_um = deque(maxlen = 50000) # 10um particles
-        ten_um.append(0)
-        
-    else:
-        pt3_um, pt5_um, one_um, twopt5_um, five_um, ten_um = None
-
     app = dash.Dash(__name__) 
     app.layout = html.Div(
         [
@@ -122,170 +97,116 @@ while True:
     #             number of intervals completed
                 n_intervals = 0
                 ),
-            html.Button("Download CSV", id='btn'),
-            dcc.Download(id='download')           
             ]
         )
     # callbacks
     @app.callback(
-        
             Output('live-graph', 'figure'),
             Input('graph-update', 'n_intervals'),
             Input('stop_btn', 'n_clicks')
+
     )
     
-    def update_graph(n, n_clicks):
-        while True:
+    def update_graph(n_intervals, n_clicks):
+            
             if n_clicks % 2 ==0: # press Stop once to stop, press again to resume
                 
-                #  sequential x values
-                X.append(X[-1]+1)
+                # writing sensor data to csv files
+                with(
+                    open(pth_data, 'a', newline='') as pth_file,
+                    open(co2_data, 'a', newline='') as co2_file,
+                    open(aq_data, 'a', newline='') as aq_file,
+
+                    ):
+                    pth(pth_file)
+                    aq(aq_file)
+                    co2(co2_file)
+                    
+                # reading co2 csv file & generating scatterplot data trace using values in csv file
+                with open(co2_data, 'r') as co2_file:
+                    co2_reader = list(csv.reader(co2_file, delimiter=','))
                 
-                if sensor != 0:
-                    Y.append(sensor.gas)
-                    t.append(sensor.temperature)
-                    h.append(sensor.humidity)
-                    p.append(sensor.pressure)
-                    a.append(sensor.altitude)
-                
-                if scd != 0:
-                    c.append(scd.CO2)
+                    gas_data = go.Scatter(
+                                 x = list(range(0,len(list(co2_reader)))),
+                                 y = list(i[0] for i in co2_reader),
+                                 name = 'CO2 (ppm)',
+                                 mode = 'lines')
                     
-                if pm25 != 0:
-                    aqdata = pm25.read()
-                    pt3_um.append(aqdata['particles 03um'])
-                    pt5_um.append(aqdata['particles 05um'])
-                    one_um.append(aqdata['particles 10um'])
-                    twopt5_um.append(aqdata['particles 25um'])
-                    five_um.append(aqdata['particles 50um'])
-                    ten_um.append(aqdata['particles 100um'])
-                    
-                graphed_data = []
-                
-                if sensor != 0:
-                    voc_data = go.Scatter(
-                        x = list(X),
-                        y = list(Y),
-                        name = 'VOC (resistance, in Ohms)',
-                        mode = 'lines',
-                        )
-                    graphed_data.append(voc_data)       
-                            
-                    temp_data = go.Scatter(
-                        x = list(X),
-                        y = list(t),
-                        name = 'Temperature (Celsius)',
-                        mode = 'lines')
-                    graphed_data.append(temp_data)
-                    
-                    humidity_data = go.Scatter(
-                        x= list(X),
-                        y = list(h),
-                        name = 'Humidity (% relative humidity)',
-                        mode = 'lines')
-                    graphed_data.append(humidity_data)
-                    
-                    pressure_data = go.Scatter(
-                        x = list(X),
-                        y = list(p),
-                        name = 'Pressure (hPa)',
-                        mode = 'lines')
-                    graphed_data.append(pressure_data)
-                    
-                    altitude_data = go.Scatter(
-                        x = list(X),
-                        y = list(a),
-                        name = 'Altitude (cm)',
-                        mode = 'lines')
-                    graphed_data.append(altitude_data)
-                    
-                if scd != 0:
-                    co2_data = go.Scatter(
-                        x = list(X),
-                        y = list(c),
-                        name = 'CO2 (PPM)',
-                        mode = 'lines')
-                    graphed_data.append(co2_data)
-                
-                if pm25 != 0:
-                    pt3_um_data = go.Scatter(
-                        x = list(X),
-                        y = list(pt3_um),
-                        name = 'Particles > 0.3um / 0.1L air',
-                        mode = 'lines')
-                    graphed_data.append(pt3_um_data)
-                    
-                    pt5_um_data = go.Scatter(
-                        x = list(X),
-                        y = list(pt5_um),
-                        name = 'Particles > 0.5um / 0.1L air',
-                        mode = 'lines')
-                    graphed_data.append(pt5_um_data)
-                    
+                # reading air quality csv file & generating scatterplot data traces using values in csv file
+                with open(aq_data, 'r') as aq_file:
+                    aq_reader = list(csv.reader(aq_file, delimiter=','))
+                    pt3um_data = go.Scatter(
+                            x = list(range(0,len(list(aq_reader)))),
+                            y = list(i[0] for i in aq_reader),
+                            name = 'Particles > 0.3um / 0.1L air',
+                            mode = 'lines')
+                    pt5um_data = go.Scatter(
+                            x = list(range(0,len(list(aq_reader)))),
+                            y = list(i[1] for i in aq_reader),
+                            name = 'Particles > 0.5um / 0.1L air',
+                            mode = 'lines')
                     one_um_data = go.Scatter(
-                        x = list(X),
-                        y = list(one_um),
-                        name = 'Particles > 1.0um / 0.1L air',
-                        mode = 'lines')
-                    graphed_data.append(one_um_data)
-                    
-                    twopt5_um_data = go.Scatter(
-                        x = list(X),
-                        y = list(twopt5_um),
-                        name = 'Particles > 2.5um / 0.1L air',
-                        mode = 'lines')
-                    graphed_data.append(twopt5_um_data)
-                    
+                            x = list(range(0,len(list(aq_reader)))),
+                            y = list(i[2] for i in aq_reader),
+                            name = 'Particles > 1.0um / 0.1L air',
+                            mode = 'lines')
+                    two_um_data = go.Scatter(
+                            x = list(range(0,len(list(aq_reader)))),
+                            y = list(i[3] for i in aq_reader),
+                            name = 'Particles > 2.0um / 0.1L air',
+                            mode = 'lines')
                     five_um_data = go.Scatter(
-                        x = list(X),
-                        y = list(five_um),
-                        name = 'Particles > 5.0um / 0.1L air',
-                        mode = 'lines')
-                    graphed_data.append(five_um_data)
-                    
+                            x = list(range(0,len(list(aq_reader)))),
+                            y = list(i[4] for i in aq_reader),
+                            name = 'Particles > 5.0um / 0.1L air',
+                            mode = 'lines')
                     ten_um_data = go.Scatter(
-                        x = list(X),
-                        y = list(ten_um),
-                        name = 'Particles > 10um / 0.1L air',
-                        mode = 'lines')
-                    graphed_data.append(ten_um_data)
-
-                
-                collected_data = []
-                collected_data.append(Y)
-                collected_data.append(t)
-                collected_data.append(h)
-                collected_data.append(p)
-                collected_data.append(a)
-                collected_data.append(c)
-                for d in collected_data:
-                    if d is None:
-                        collected_data.remove(d)
-                
-                f = 'rpi_data.csv'
-                with open(f, 'w', newline='') as file:
-                 writer = csv.writer(file)
-                 writer.writerow(header)
-                
-                 for i in range (len(X)):
-                     if i == 0:
-                         line = []
-                         line.append(d[i]for d in collected_data) # preventing indexing errors, because the first value has index 0 
-
-                     else:
-                         line =[]
-                         line.append(d[i-1] for d in collected_data) # preventing indexing errors, e.g. 4th value has index of 3 instead of 4
-
-                     writer.writerow(line)
-                 
-
-                return {'data':graphed_data,
-                        'layout': go.Layout(xaxis = dict(
-                                range = [min(X), max(X)]), xaxis_title = dict(text='Time (seconds)'), clickmode = 'event+select'
+                            x = list(range(0,len(list(aq_reader)))),
+                            y = list(i[5] for i in aq_reader),
+                            name = 'Particles > 10.0um / 0.1L air',
+                            mode = 'lines')
+                    
+                # reading PTH csv file & generating scatterplot data traces using values in csv file
+                with open(pth_data,'r') as pth_file:
+                    pth_reader = list(csv.reader(pth_file, delimiter=','))
+                    voc_data = go.Scatter(
+                            x = list(range(0, len(list(pth_reader)))),
+                            y = list(i[0] for i in pth_reader), # list of first value in every row
+                            name = 'VOC (resistance, in Ohms)',
+                            mode = 'lines'
+                            )
+                    temp_data = go.Scatter(
+                            x = list(range(0,len(list(pth_reader)))),
+                            y = list(i[1] for i in pth_reader),
+                            name = 'Temperature (Celsius)',
+                            mode = 'lines')
+                    humidity_data = go.Scatter(
+                            x = list(range(0,len(list(pth_reader)))),
+                            y = list(i[2] for i in pth_reader),
+                            name = 'Humidity (% relative humidity)',
+                            mode = 'lines')
+                    pressure_data = go.Scatter(
+                            x = list(range(0,len(list(pth_reader)))),
+                            y = list(i[3] for i in pth_reader),
+                            name = 'Pressure (hPa)',
+                            mode = 'lines')
+                    altitude_data = go.Scatter(
+                            x = list(range(0,len(list(pth_reader)))),
+                            y = list(i[4] for i in pth_reader),
+                            name = 'Altitude (cm)',
+                            mode = 'lines')
+                    
+                # list of all scatterplot data traces & layout formatting    
+                return {'data': [voc_data, temp_data, humidity_data, pressure_data, altitude_data,
+                                 pt3um_data, pt5um_data, one_um_data, two_um_data, five_um_data, ten_um_data,
+                                 gas_data],
+                     'layout': go.Layout(xaxis = dict(
+                      range = [0, len(list(pth_reader))]), xaxis_title = dict(text='Time (seconds)')
                                             
-                                )}
-    
+                             )}
+            
+            elif n_clicks % 2 != 0: # stop button pressed
+                print('Graph has been paused')
 
     if __name__ == '__main__':
         app.run_server()
-                              
